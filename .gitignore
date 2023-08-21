@@ -162,3 +162,5 @@ cython_debug/
 # Other
 .vscode
 *.DS_Store
+score_checkpoints/
+dpi_checkpoints/

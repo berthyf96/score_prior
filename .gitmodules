@@ -1,0 +1,3 @@
+[submodule "score_flow"]
+	path = score_flow
+	url = https://github.com/berthyf96/score_flow
