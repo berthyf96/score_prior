@@ -54,10 +54,10 @@ python train_dpi.py \
   --config.likelihood.likelihood Denoising \
   --config.likelihood.noise_scale 0.2 \
   --config.training.batch_size 32 \
-  --config.training.n_iters 1000000 \
-  --config.training.snapshot_freq 10000 \
-  --config.optim.learning_rate 1e-5 \
-  --config.optim.grad_clip 2e-4 \
+  --config.training.n_iters 10000 \
+  --config.training.snapshot_freq 100 \
+  --config.optim.learning_rate 2e-4 \
+  --config.optim.grad_clip 1. \
   --score_model_config.training.sde vpsde
 ```
 Replace `config.prob_flow.score_model_dir` with the path to your trained score model.
