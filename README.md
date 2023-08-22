@@ -1,8 +1,11 @@
 # Score-Based Priors for Bayesian Inverse Imaging
+
 [Webpage](http://imaging.cms.caltech.edu/score_prior/) | [PDF](https://arxiv.org/abs/2304.11751)
 
-**BibTeX:**
+![figure showing posterior samples using score-based priors under different measurement settings](assets/teaser.png "Score-Based Priors")
 
+
+**BibTeX:**
 ```
 @inproceedings{feng2023score,
   title={Learning Bandwidth Expansion Using Perceptually-Motivated Loss},
