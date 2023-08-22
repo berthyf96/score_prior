@@ -68,8 +68,6 @@ python train_dpi.py \
 Replace `config.prob_flow.score_model_dir` with the path to your trained score model.
 You can also change the forward model by changing `config.likelihood`.
 
-## Demos
-Coming soon!
 
 ## Customization
 Datasets can be added in `score_flow/datasets.py`.
