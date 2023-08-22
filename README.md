@@ -8,7 +8,7 @@
 **BibTeX:**
 ```
 @inproceedings{feng2023score,
-  title={Learning Bandwidth Expansion Using Perceptually-Motivated Loss},
+  title={Score-Based Diffusion Models as Principled Priors for Inverse Imaging},
   author={Feng, Berthy T and Smith, Jamie and Rubinstein, Michael and Chang, Huiwen and Bouman, Katherine L and Freeman, William T},
   booktitle={International Conference on Computer Vision (ICCV)},
   year={2023},
