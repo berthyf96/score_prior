@@ -1,4 +1,4 @@
-"""Train DPI."""
+"""Optimize DPI."""
 import datetime
 import logging
 import os
@@ -186,9 +186,8 @@ def train(train_step_fn: Any,
     # Update data weight.
     data_weight = losses.data_weight_fn(
         step,
-        start_order=config.optim.lambda_data_start_order,
-        decay_rate=config.optim.lambda_data_decay_steps,
-        final_data_weight=config.optim.lambda_data)
+        rate=config.optim.data_annealing_rate,
+        pivot_steps=config.optim.data_annealing_pivot)
     pstate = pstate.replace(
         data_weight=flax.jax_utils.replicate(data_weight))
 
@@ -226,7 +225,7 @@ def main(_):
   sde, t0 = utils.get_sde(score_model_config)
 
   if utils.is_coordinator():
-    tf.io.gfile.makedirs(workdir)
+    os.makedirs(workdir, exist_ok=True)
     save_configs()
     logging.info('[INFO] local device count = %d', jax.local_device_count())
     logging.info('[INFO] device count = %d', jax.device_count())

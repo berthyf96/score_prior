@@ -16,7 +16,7 @@
 """A library of forward models with associated log-likelihood functions."""
 
 import abc
-from typing import Tuple
+from typing import Optional, Tuple
 
 import ehtim as eh
 import ehtim.const_def as ehc
@@ -25,6 +25,8 @@ import jax.numpy as jnp
 from jaxtyping import Array
 import numpy as np
 import scipy.linalg
+
+from ehtim_utils import cphase_diag_info, logcamp_diag_info, M87_systematic_noise
 
 
 class IndependentGaussianLikelihood(abc.ABC):
@@ -295,8 +297,10 @@ class Interferometry:
   def __init__(self,
                obs: eh.obsdata.Obsdata,
                im: eh.image.Image,
-               flux_multiplier: float,
-               data_products: str = 'visamp_cphase'):
+               scale_flux: bool = False,
+               flux_multiplier: Optional[float] = None,
+               diagonalize: bool = False,
+               add_station_sys_noise: bool = False):
     """Initialize `Interferometry` module.
     Args:
       obs: eht-imaging `Obsdata` object. This must be preprocessed to have
@@ -304,19 +308,46 @@ class Interferometry:
         has pixel values in range [0, 1], cphase and amplitude measurements
         already computed).
       im: eht-imaging `Image` object that has dummy image information.
-      flux_multiplier: The multiplier that has been used to scale the
-        visibilities in `obs`.
-      data_products: string specifying which data products to use
-        'vis' | 'visamp_cphase' | 'visamp_cphase_logcamp'.
+      scale_flux: Whether to apply `flux_multiplier` to visibilities and sigmas.
+      flux_multiplier: The multiplier that will be used to scale visibilities
+        and sigmas in `obs` if `scale_flux` is True.
+      diagonalize: Whether to transform closure quantities so that 
+        they have diagonal covariance matrices.
+      add_station_sys_noise: Whether to add station-dependent systematic noise
+        to visibility sigmas. This is useful for M87 real data and 
+        non-amplitude-calibrated simulated data.
     """
     assert im.xdim == im.ydim
+    self.im = im
     self.image_size = im.xdim
-    self.obs = obs
     self.flux_multiplier = flux_multiplier
-    self.data_products = data_products
-    
-    # Get forward model for complex visibilities.
-    _, _, A_vis = eh.imaging.imager_utils.chisqdata_vis(obs, im, mask=[])
+    self.diagonalize = diagonalize
+
+    # Add systematic noise to visibility sigmas before scaling.
+    if add_station_sys_noise:
+      systematic_noise = M87_systematic_noise(add_LM=True)
+    else:
+      systematic_noise = 0.
+
+    # Get forward model and systematic noise for complex visibilities.
+    _, sigma_vis, A_vis = eh.imaging.imager_utils.chisqdata_vis(
+      obs, im, mask=[], systematic_noise=systematic_noise)
+    obs.data['sigma'] = sigma_vis
+
+    if scale_flux:
+      # Scale visibilities and visibility sigmas.
+      obs.data['vis'] *= flux_multiplier
+      obs.data['sigma'] *= flux_multiplier
+
+    self.obs = obs
+
+    # Compute visibility amplitudes and closure quantities.
+    obs.add_amp(debias=True)
+    obs.add_cphase(count='min')
+    obs.add_logcamp(debias=True, count='min')
+    if diagonalize:
+      obs.add_cphase_diag(count='min')
+      obs.add_logcamp_diag(debias=True, count='min')
 
     # Get forward model for closure phases.
     _, _, A_cp = eh.imaging.imager_utils.chisqdata_cphase(obs, im, mask=[])
@@ -338,45 +369,53 @@ class Interferometry:
     self.visamp = obs.amp['amp']
     self.cphase = obs.cphase['cphase']
     self.logcamp = obs.logcamp['camp']
-    if data_products not in ['vis', 'visamp_cphase', 'visamp_cphase_logcamp']:
-      raise ValueError(f'Unrecognized data products: {data_products}')
-
-  # @functools.partial(jax.vmap, in_axes=(None, 0))
-  def apply_forward_operator(self, x):
-    xvec = x.reshape(len(x), -1)
-
-    if self.data_products == 'vis':
-      # Complex visibilities
-      vis_expanded = jnp.einsum('ij,bj->bi', self.A_vis_expanded, xvec)
-      return vis_expanded
     
-    if self.data_products in ['visamp_cphase', 'visamp_cphase_logcamp']:
-      # Visibility amplitudes
-      vis = jnp.einsum('ij,bj->bi', self.A_vis, xvec)
-      vis_amp = jnp.abs(vis)
-      # Closure phases
-      i1 = jnp.einsum('ij,bj->bi', self.A_cp[0], xvec)
-      i2 = jnp.einsum('ij,bj->bi', self.A_cp[1], xvec)
-      i3 = jnp.einsum('ij,bj->bi', self.A_cp[2], xvec)
-      cphase = jnp.angle(i1 * i2 * i3)
-    if self.data_products == 'visamp_cphase':
-      return vis_amp, cphase
-    elif self.data_products == 'visamp_cphase_logcamp':
-      # Log-closure amplitudes
-      a1 = np.abs(np.dot(self.A_logca[0], xvec))
-      a2 = np.abs(np.dot(self.A_logca[1], xvec))
-      a3 = np.abs(np.dot(self.A_logca[2], xvec))
-      a4 = np.abs(np.dot(self.A_logca[3], xvec))
-      logcamp = jnp.log(a1) + jnp.log(a2) - jnp.log(a3) - jnp.log(a4)
-      return vis_amp, cphase, logcamp
+    if diagonalize:
+      self.cphase = obs.cphase_diag['cphase']
+      self.sigma_cp = obs.cphase_diag['sigmacp']
+
+      self.logcamp = obs.logcamp_diag['camp']
+      self.sigma_logca = obs.logcamp_diag['sigmaca']
+
+      # Tranformation matrices for diagonalizing closure quantities.
+      _, _, self.diag_cphase_tform_matrix = cphase_diag_info(obs)
+      _, _, self.diag_logca_tform_matrix = logcamp_diag_info(obs)
+
+      # Quantities for computing diagonalized closure quantity chi^2.
+      self.cphase_diag, self.sigma_cp_diag, self.A_cp_diag = eh.imaging.imager_utils.chisqdata_cphase_diag(obs, im, mask=[])
+      self.logcamp_diag, self.sigma_logca_diag, self.A_logca_diag = eh.imaging.imager_utils.chisqdata_logcamp_diag(obs, im, mask=[])
+
+  def apply_forward_operator(self, x):
+    pass
+    
+  def apply_forward_operator_vis(self, xvec):
+    return jnp.einsum('ij,bj->bi', self.A_vis_expanded, xvec)
+  
+  def apply_forward_operator_visamp(self, xvec):
+    vis = jnp.einsum('ij,bj->bi', self.A_vis, xvec)
+    return jnp.abs(vis)
+  
+  def apply_forward_operator_cphase(self, xvec):
+    i1 = jnp.einsum('ij,bj->bi', self.A_cp[0], xvec)
+    i2 = jnp.einsum('ij,bj->bi', self.A_cp[1], xvec)
+    i3 = jnp.einsum('ij,bj->bi', self.A_cp[2], xvec)
+    cphase = jnp.angle(i1 * i2 * i3)
+    if self.diagonalize:
+      cphase = jnp.einsum('ij,bj->bi', self.diag_cphase_tform_matrix, cphase)
+    return cphase
+  
+  def apply_forward_operator_logcamp(self, xvec):
+    a1 = jnp.abs(jnp.einsum('ij,bj->bi', self.A_logca[0], xvec))
+    a2 = jnp.abs(jnp.einsum('ij,bj->bi', self.A_logca[1], xvec))
+    a3 = jnp.abs(jnp.einsum('ij,bj->bi', self.A_logca[2], xvec))
+    a4 = jnp.abs(jnp.einsum('ij,bj->bi', self.A_logca[3], xvec))
+    logcamp = jnp.log(a1) + jnp.log(a2) - jnp.log(a3) - jnp.log(a4)
+    if self.diagonalize:
+      logcamp = jnp.einsum('ij,bj->bi', self.diag_logca_tform_matrix, logcamp)
+    return logcamp
   
   def get_measurement(self):
-    if self.data_products == 'vis':
-      return self.vis_expanded[None, :]
-    elif self.data_products == 'visamp_cphase':
-      return self.visamp[None, :], self.cphase[None, :]
-    elif self.data_products == 'visamp_cphase_logcamp':
-      return self.visamp[None, :], self.cphase[None, :], self.logcamp[None, :]
+    pass
 
   def invert_measurement(self, fov):
     dirty_image = self.obs.dirtyimage(self.image_size, fov)
@@ -388,56 +427,72 @@ class Interferometry:
                     visamp_weight=1.,
                     cphase_weight=1.,
                     logcamp_weight=1.):
-    if self.data_products == 'vis':
-      residual_expanded = self.vis_expanded[None, :] - self.apply_forward_operator(x)
-      return vis_weight * jnp.mean(jnp.square(residual_expanded / self.sigma_vis_expanded), axis=-1)
-    if self.data_products in ['visamp_cphase', 'visamp_cphase_logcamp']:
-      visamp_pred, cphase_pred = self.apply_forward_operator(x)[:2]
-      # Visibility amplitudes
+    xvec = x.reshape(len(x), -1)
+
+    vis_loss = visamp_loss = cphase_loss = logcamp_loss = 0
+    if vis_weight != 0.:
+      residual_expanded = self.vis_expanded[None, :] - self.apply_forward_operator_vis(xvec)
+      vis_loss = jnp.mean(jnp.square(residual_expanded / self.sigma_vis_expanded), axis=-1)
+
+    if visamp_weight != 0.:
+      visamp_pred = self.apply_forward_operator_visamp(xvec)
       residual = self.visamp[None, :] - visamp_pred
       visamp_loss = jnp.mean(jnp.square(residual / self.sigma_vis), axis=-1)
-      # Closure phases
+
+    if cphase_weight != 0.:
+      cphase_pred = self.apply_forward_operator_cphase(xvec)
       cphase_true = self.cphase * ehc.DEGREE
       angle_residual = cphase_true[None, :] - cphase_pred
       sigma = self.sigma_cp * ehc.DEGREE
       cphase_loss = 2. * jnp.mean((1 - jnp.cos(angle_residual)) / jnp.square(sigma), axis=-1)
-    if self.data_products == 'visamp_cphase':
-      return visamp_weight * visamp_loss + cphase_weight * cphase_loss
-    elif self.data_products == 'visamp_cphase_logcamp':
-      logcamp_pred = self.apply_forward_operator(x)[2]
-      # Log-closure amplitudes
+    
+    if logcamp_weight != 0.:
+      logcamp_pred = self.apply_forward_operator_logcamp(xvec)
       residual = self.logcamp[None, :] - logcamp_pred
       logcamp_loss = jnp.mean(jnp.square(residual / self.sigma_logca), axis=-1)
-      return visamp_weight * visamp_loss + cphase_weight * cphase_loss + logcamp_weight * logcamp_loss
+      
+    return vis_weight * vis_loss + visamp_weight * visamp_loss + cphase_weight * cphase_loss + logcamp_weight * logcamp_loss
 
   def avg_chisq_vis(self, x):
     """Compute average visibility chi^2 for a given batch of images."""
     chisq = np.zeros(len(x))
-    for i, xi in enumerate(x):
+    xvec = x.reshape(len(x), -1)
+    for i, xi in enumerate(xvec):
       chisq[i] = eh.imaging.imager_utils.chisq_vis(
-        xi.reshape(-1), self.A_vis, self.vis, self.sigma_vis)
+        xi, self.A_vis, self.vis, self.sigma_vis)
     return np.mean(chisq)
 
   def avg_chisq_visamp(self, x):
     """Compute average amplitude chi^2 for a given batch of images."""
     chisq = np.zeros(len(x))
-    for i, xi in enumerate(x):
+    xvec = x.reshape(len(x), -1)
+    for i, xi in enumerate(xvec):
       chisq[i] = eh.imaging.imager_utils.chisq_amp(
-        xi.reshape(-1), self.A_vis, self.visamp, self.sigma_vis)
+        xi, self.A_vis, self.visamp, self.sigma_vis)
     return np.mean(chisq)
 
   def avg_chisq_cphase(self, x):
     """Compute average closure phase chi^2 for a given batch of images."""
     chisq = np.zeros(len(x))
-    for i, xi in enumerate(x):
-      chisq[i] = eh.imaging.imager_utils.chisq_cphase(
-        xi.reshape(-1), self.A_cp, self.cphase, self.sigma_cp)
+    xvec = x.reshape(len(x), -1)
+    for i, xi in enumerate(xvec):
+      if self.diagonalize:
+        chisq[i] = eh.imaging.imager_utils.chisq_cphase_diag(
+          xi, self.A_cp_diag, self.cphase_diag, self.sigma_cp_diag)
+      else:
+        chisq[i] = eh.imaging.imager_utils.chisq_cphase(
+          xi, self.A_cp, self.cphase, self.sigma_cp)
     return np.mean(chisq)
   
   def avg_chisq_logcamp(self, x):
     """Compute average log closure amplitude chi^2 for a given batch of images."""
     chisq = np.zeros(len(x))
-    for i, xi in enumerate(x):
-      chisq[i] = eh.imaging.imager_utils.chisq_logcamp(
-        xi.reshape(-1), self.A_logca, self.logcamp, self.sigma_logca)
+    xvec = x.reshape(len(x), -1)
+    for i, xi in enumerate(xvec):
+      if self.diagonalize:
+        chisq[i] = eh.imaging.imager_utils.chisq_logcamp_diag(
+          xi, self.A_logca_diag, self.logcamp_diag, self.sigma_logca_diag)
+      else:
+        chisq[i] = eh.imaging.imager_utils.chisq_logcamp(
+          xi, self.A_logca, self.logcamp, self.sigma_logca)
     return np.mean(chisq)

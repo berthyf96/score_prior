@@ -32,21 +32,15 @@ def get_config():
   optim.lambda_data = 1.
   optim.lambda_prior = 1.
   optim.lambda_entropy = 1.
-  optim.prior = 'ode'  # ['ode', 'l1', 'tv', 'tsv', 'realnvp']
+  optim.prior = 'dsm'  # ['dsm', 'ode', 'l1', 'tv', 'tsv', 'realnvp']
   optim.realnvp_checkpoint = ''
   optim.adam_beta1 = 0.9
   optim.adam_beta2 = 0.999
   optim.adam_eps = 1e-8
-  optim.lambda_data_start_order = 0  # initial data weight = 10**(-start_order)
-  optim.lambda_data_decay_steps = 1000  # num. steps to decrease data weight by one order of magnitude
+  optim.anneal_data = False  # whether to anneal data weight
+  optim.data_annealing_rate = 0.002  # rate of sigmoidal data weight increase
+  optim.data_annealing_pivot = 12000  # num. steps at which data weight is 0.5
   optim.dsm_nt = 1  # num. time samples to approximate DSM objective
-  # For interferometry:
-  optim.center_weight = 0.
-  optim.vis_weight_multiplier = 0.5
-  optim.visamp_weight_multiplier = 0.5
-  optim.cphase_weight_multiplier = 0.5
-  optim.logcamp_weight_multiplier = 0.5
-  optim.flux_multiplier_multiplier = 1.
 
   config.likelihood = likelihood = ml_collections.ConfigDict()
   likelihood.likelihood = ''
@@ -57,9 +51,28 @@ def get_config():
   likelihood.eht_image_path = ''
   likelihood.eht_matrix_path = ''
   likelihood.eht_sigmas_path = ''
-  likelihood.interferometry_image_path = ''
-  likelihood.interferometry_obs_path = ''
-  likelihood.interferometry_data_products = 'visamp_cphase'
+
+  config.likelihood.interferometry = interferometry = ml_collections.ConfigDict()
+  interferometry.realdata = False
+  interferometry.image_path = ''
+  interferometry.obs_path1 = ''
+  interferometry.obs_path2 = ''
+  interferometry.center_weight = 0.
+  interferometry.flux_weight = 1.
+  interferometry.vis_weight_multiplier = 0.
+  interferometry.visamp_weight_multiplier = 0.
+  interferometry.cphase_weight_multiplier = 0.5
+  interferometry.logcamp_weight_multiplier = 0.5
+  interferometry.flux_multiplier_multiplier = 0.33
+  interferometry.use_target_flux = True  # whether to use `target_flux` instead of `flux_multiplier_multiplier`
+  interferometry.target_flux = 1.
+  interferometry.scale_flux = False
+  interferometry.diagonalize = False
+  interferometry.frac_sys_noise = 0.0
+  interferometry.add_station_sys_noise = False
+  interferometry.fov_uas = 128
+  interferometry.prior_fwhm_uas = 40
+  interferometry.zbl = 0.6
 
   config.data = data = ml_collections.ConfigDict()
   data.dataset = ''
@@ -70,10 +83,11 @@ def get_config():
   data.tfds_dir = '/scratch/imaging/projects/bfeng/tensorflow_datasets'
   data.random_flip = False
   data.category = 'church_outdoor'
-  data.antialias = True
   data.taper = False
   data.taper_gaussian_blur_sigma = 2
   data.taper_frac_radius = 0.3
+  data.constant_flux = False  # whether to scale images to have the same total flux
+  data.total_flux = 200.  # total flux if `constant_flux` is True
 
   config.prob_flow = prob_flow = ml_collections.ConfigDict()
   prob_flow.score_model_dir = ''

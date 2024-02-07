@@ -1,3 +1,5 @@
+This folder is a fork of Yang Song's `score_flow` [repo](https://github.com/yang-song/score_flow).
+
 # Maximum Likelihood Training of Score-Based Diffusion Models
 
 This repo contains the official implementation for the paper [Maximum Likelihood Training of Score-Based Diffusion Models](https://arxiv.org/abs/2101.09258)

@@ -22,6 +22,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 
+import probability_bound
 from posterior_sampling import model_utils
 
 
@@ -132,6 +133,8 @@ def get_center_loss_fn(center, dim):
 
 def get_interferometry_prior_loss_fn(
     config,
+    target_flux,
+    flux_weight=0.,
     score_fn=None,
     sde=None,
     prob_flow=None,
@@ -148,11 +151,24 @@ def get_interferometry_prior_loss_fn(
   image_size = config.data.image_size
   center_loss_fn = get_center_loss_fn(image_size / 2 - 0.5, image_size)
 
+  # Flux loss function.
+  def flux_loss_fn(x):
+    total_flux = jnp.sum(x, axis=(1, 2, 3))
+    flux_losses = jnp.square(total_flux - target_flux)
+    return jnp.mean(flux_losses)
+
   # Total prior loss.
   def interferometry_prior_loss_fn(rng, x):
     prior_loss = prior_loss_fn(rng, x)
     center_loss = center_loss_fn(x)
-    return prior_loss + config.optim.center_weight * center_loss
+    if flux_weight == 0.:
+      flux_loss = 0.
+    else:
+      flux_loss = flux_loss_fn(x)
+    return (
+      prior_loss
+      + config.likelihood.interferometry.center_weight * center_loss
+      + flux_weight * flux_loss)
 
   return interferometry_prior_loss_fn
 
@@ -187,13 +203,24 @@ def get_prior_loss_fn(
     The prior loss function, which outputs the prior loss value for a given
       RNG and batch of data.
   """
-  if config.optim.prior == 'ode':
+  if config.optim.prior.lower() == 'ode':
     if prob_flow is None:
       raise ValueError('Must provide `prob_flow` for ODE prior.')
     logp_fn = functools.partial(prob_flow.logp_fn, t0=t0, t1=t1, dt0=dt0)
     def prior_loss_fn(rng, x):
       log_prior = logp_fn(rng, x)
       return -jnp.mean(log_prior)
+  elif config.optim.prior.lower() == 'dsm':
+    if score_fn is None or sde is None:
+      raise ValueError('Must provide `score_fn` and `sde` for DSM/SM prior.')
+    image_dim = config.data.image_size**2 * config.data.num_channels
+    bound_fn = probability_bound.get_likelihood_bound_fn(
+      sde, score_fn, image_dim,
+      dsm=True, eps=t0, N=config.optim.dsm_nt, importance_weighting=True,
+      eps_offset=True)
+    def prior_loss_fn(rng, x):
+      losses = -bound_fn(rng, x)
+      return jnp.mean(losses)
   elif config.optim.prior.lower() == 'realnvp':
     realnvp_config = config.copy_and_resolve_references()
     model, model_state, params = model_utils.get_model_and_init_params(
@@ -243,23 +270,9 @@ def entropy_weight_fn(step, start_order, decay_rate, final_weight):
   return max(10**(start_order - step / decay_rate), final_weight)
 
 
-def data_weight_fn(step,
-                   start_order,
-                   decay_rate,
-                   final_data_weight):
-  """Annealing function for data weight, as proposed in alpha-DPI.
-  Args:
-    step: Current step number.
-    start_order: Initial data weight is `10**(-start_order)`.
-    decay_rate: Number of steps it takes to increase data weight by one
-      order of magnitude.
-    final_data_weight: Maximum data weight.
-  Returns:
-    Data weight at training step `step`.
-  """
-  if step >= (start_order * decay_rate):
-    return final_data_weight
-  return min(10**(-start_order + step / decay_rate), final_data_weight)
+def data_weight_fn(step, rate, pivot_steps):
+  """Sigmoidal annealing function for data weight increase. Assumes final data weight is 1."""
+  return 1 / (1 + np.exp(-(step - pivot_steps) * rate))
 
 
 def sigma_annealing_fn(step, start_order, decay_rate, final_weight):

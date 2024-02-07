@@ -36,7 +36,10 @@ def get_config():
   # data
   # need to define: data.dataset, data.image_size, data.num_channels
   config.data = data = ml_collections.ConfigDict()
+  data.antialias = True
   data.random_flip = True
+  data.random_rotation = False
+  data.random_zoom = False
   data.uniform_dequantization = False
   data.centered = False
   data.dataset = ''
@@ -49,9 +52,11 @@ def get_config():
   data.normalization_type = 'score_sde'
   data.n_bits = 8
   data.standardize = False
-  data.taper = False  # taper with a centered Gaussian blob
-  data.taper_frac_radius = 1.  # radius of hard circle mask
-  data.taper_gaussian_blur_sigma = 2  # amount to blur the hard cicle mask
+  data.taper_frac_radius_min = 0.1  # fractional radius of hard mask
+  data.taper_frac_radius_max = 0.65  # fractional radius of hard mask
+  data.taper_gaussian_blur_sigma = 2.  # amount to blur the hard mask (fractional or absolute)
+  data.constant_flux = False  # whether to scale images to have the same total flux
+  data.total_flux = 200.  # total flux if `constant_flux` is True
 
   # model
   config.model = model = ml_collections.ConfigDict()

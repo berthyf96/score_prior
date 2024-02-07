@@ -18,9 +18,11 @@ import os
 
 import diffrax
 import ehtim as eh
+import ehtim.const_def as ehc
 from flax.training import checkpoints
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import ml_collections
 import numpy as np
 from score_flow.models import utils as mutils
@@ -31,9 +33,11 @@ from score_flow import datasets
 from score_flow import utils
 from tensorflow.io import gfile
 
+from ehtim_utils import estimate_flux_multiplier
 import forward_models
 import mri
 import probability_flow
+from posterior_sampling import model_utils as dpi_mutils
 
 
 def get_score_fn(config,
@@ -100,7 +104,7 @@ def _get_stepsize_controller(stepsize_controller,
                              ):
   """Return `diffrax.AbstractStepSizeController` instance."""
   if stepsize_controller == 'ConstantStepSize':
-    return diffrax.ConstantStepSize(compile_steps=True)
+    return diffrax.ConstantStepSize()
   elif stepsize_controller == 'PIDController':
     if adjoint_rms_seminorm:
       return diffrax.PIDController(
@@ -109,6 +113,29 @@ def _get_stepsize_controller(stepsize_controller,
       return diffrax.PIDController(rtol=rtol, atol=atol)
   else:
     raise ValueError(f'Unsupported stepsize controller: {stepsize_controller}')
+  
+
+
+def _get_adjoint_solver(adjoint_method, adjoint_solver,
+                        adjoint_stepsize_controller,
+                        adjoint_rtol, adjoint_atol, adjoint_rms_seminorm):
+  """Return `diffrax.AbstractSolver` for the adjoint."""
+  if adjoint_method == 'RecursiveCheckpointAdjoint':
+    adjoint = diffrax.RecursiveCheckpointAdjoint()
+  elif adjoint_method == 'BacksolveAdjoint':
+    adjoint_solver = _get_solver(adjoint_solver, scan_stages=True)
+    adjoint_stepsize_controller = _get_stepsize_controller(
+        adjoint_stepsize_controller,
+        adjoint_rtol,
+        adjoint_atol,
+        adjoint_rms_seminorm)
+    adjoint = diffrax.BacksolveAdjoint(
+        solver=adjoint_solver,
+        stepsize_controller=adjoint_stepsize_controller)
+  else:
+    raise ValueError(
+        f'Unsupported adjoint method: {adjoint_method}')
+  return adjoint
 
 
 def get_prob_flow(config,
@@ -136,23 +163,13 @@ def get_prob_flow(config,
       config.prob_flow.atol)
 
   # Adjoint solver and step-size controller.
-  if config.prob_flow.adjoint_method == 'RecursiveCheckpointAdjoint':
-    adjoint = diffrax.RecursiveCheckpointAdjoint()
-  elif config.prob_flow.adjoint_method == 'BacksolveAdjoint':
-    adjoint_solver = _get_solver(
-        config.prob_flow.adjoint_solver,
-        scan_stages=True)
-    adjoint_stepsize_controller = _get_stepsize_controller(
-        config.prob_flow.adjoint_stepsize_controller,
-        config.prob_flow.adjoint_rtol,
-        config.prob_flow.adjoint_atol,
-        config.prob_flow.adjoint_rms_seminorm)
-    adjoint = diffrax.BacksolveAdjoint(
-        solver=adjoint_solver,
-        stepsize_controller=adjoint_stepsize_controller)
-  else:
-    raise ValueError(
-        f'Unsupported adjoint method: {config.prob_flow.adjoint_method}')
+  adjoint = _get_adjoint_solver(
+    config.prob_flow.adjoint_method,
+    config.prob_flow.adjoint_solver,
+    config.prob_flow.adjoint_stepsize_controller,
+    config.prob_flow.adjoint_rtol,
+    config.prob_flow.adjoint_atol,
+    config.prob_flow.adjoint_rms_seminorm)
 
   prob_flow = probability_flow.ProbabilityFlow(
       sde=sde,
@@ -171,8 +188,7 @@ def _get_eht_image(config):
   return image / image.max()
 
 
-def get_likelihood(config
-                   ):
+def get_likelihood(config):
   """Return the likelihood module matching the config."""
   image_size = config.data.image_size
   image_shape = (
@@ -227,33 +243,47 @@ def get_likelihood(config
         mask, sigmas=jnp.ones(dim) * noise_scale, image_shape=image_shape)
   elif config.likelihood.likelihood == 'Interferometry':
     # Load simulated data.
-    im = eh.image.load_fits(config.likelihood.interferometry_image_path)
+    im = eh.image.load_fits(config.likelihood.interferometry.image_path)
     orig_flux = im.total_flux()
     im = im.regrid_image(im.fovx(), config.data.image_size)
     im.ivec = (im.ivec / np.sum(im.ivec)) * orig_flux
     obs = eh.obsdata.load_uvfits(
-      config.likelihood.interferometry_obs_path, remove_nan=True)
+      config.likelihood.interferometry.obs_path, remove_nan=True)
+    
+    # Add non-closing systematic noise to the observation (i.e., increase error bars, not add noise to measurements)
+    obs = obs.add_fractional_noise(config.likelihood.interferometry.frac_sys_noise)
+    
+    multiplier = estimate_flux_multiplier(
+      obs,
+      config.data.image_size,
+      fov=config.likelihood.interferometry.fov_uas * ehc.RADPERUAS,
+      zbl=config.likelihood.interferometry.zbl,
+      prior_fwhm=config.likelihood.interferometry.prior_fwhm_uas * ehc.RADPERUAS)
+    multiplier *= config.likelihood.interferometry.flux_multiplier_multiplier
 
     # # Estimate the multiplier by which to scale image pixel values to get to [0, 1] range.
     # im_blurred = im.blur_circ(obs.res())
     # # This is a rather conservative blurring, so try multiplying by 0.5-0.7.
-    # im_blurred.ivec *= 1.0
-    # multiplier = round(1 / im_blurred.ivec.max())
+    # # im_blurred.ivec *= 0.7
+    # multiplier = round(1 / im_blurred.ivec.max()) * config.likelihood.interferometry.flux_multiplier_multiplier
 
-    multiplier = round(1 / im.ivec.max()) * config.optim.flux_multiplier_multiplier
+    # multiplier = round(1 / im.ivec.max()) * config.likelihood.interferometry.flux_multiplier_multiplier
     print(f'multiplier: {multiplier}')
 
-    # Scale visibilities and visibility sigmas.
-    obs.data['vis'] *= multiplier
-    obs.data['sigma'] *= multiplier
+    # # Scale visibilities and visibility sigmas.
+    # obs.data['vis'] *= multiplier
+    # obs.data['sigma'] *= multiplier
 
-    # Recompute visibility amplitudes and closure quantities.
-    obs.add_amp(debias=True)
-    obs.add_cphase(count='min')
-    obs.add_logcamp(debias=True, count='min')
+    # # Recompute visibility amplitudes and closure quantities.
+    # obs.add_amp(debias=True)
+    # obs.add_cphase(count='min')
+    # obs.add_logcamp(debias=True, count='min')
 
     likelihood = forward_models.Interferometry(
-      obs, im, multiplier, config.likelihood.interferometry_data_products)
+      obs, im, multiplier, config.likelihood.interferometry.diagonalize,
+      config.likelihood.interferometry.add_station_sys_noise)
+
+    # likelihood = forward_models.Interferometry(obs, im, multiplier)
   return likelihood
 
 
@@ -276,8 +306,11 @@ def get_measurement(config,
   if config.likelihood.likelihood == 'EHT' and config.data.centered:
     raise ValueError('Do not center data for EHT likelihood.')
   if config.likelihood.likelihood == 'Interferometry':
-    im = eh.image.load_fits(config.likelihood.interferometry_image_path)
-    im = im.regrid_image(im.fovx(), config.data.image_size)
+    im = eh.image.load_fits(config.likelihood.interferometry.image_path)
+    im = im.regrid_image(
+      config.likelihood.interferometry.fov_uas * ehc.RADPERUAS,
+      config.data.image_size)
+    # im.ivec = (im.ivec / np.sum(im.ivec)) * config.likelihood.interferometry.zbl
     true_image = im.ivec.reshape(config.data.image_size, config.data.image_size, 1)
     return true_image, None
   if config.data.dataset == 'EHT':
@@ -344,3 +377,28 @@ def get_measurement(config,
   y = likelihood.get_measurement(jax.random.PRNGKey(0), x)
 
   return image, y
+
+
+def get_sample_fn(dpi_config, dpi_ckpt_dir, use_train_mode=True):
+  """Get sampling function of trained DPI model."""
+  # Load DPI model.
+  model, model_state, params = dpi_mutils.get_model_and_init_params(
+    dpi_config, train=use_train_mode)
+
+  state = dpi_mutils.State(
+      step=0,
+      opt_state=None,
+      params=params,
+      model_state=model_state,
+      data_weight=1,
+      prior_weight=1,
+      entropy_weight=1,
+      rng=jax.random.PRNGKey(dpi_config.seed + 1))
+
+  state = checkpoints.restore_checkpoint(dpi_ckpt_dir, state)
+  print(f'Found checkpoint {state.step}')
+
+  params = state.params
+  model_state = state.model_state
+  sample_fn = dpi_mutils.get_sampling_fn(model, params, model_state, train=use_train_mode)
+  return sample_fn, state.step
