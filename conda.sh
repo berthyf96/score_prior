@@ -1,7 +1,4 @@
 # TensorFlow 2.12, CUDA 11.8, CuDNN 8.6
-conda update -n base -c defaults conda
-conda create -n score_prior -y python=3.10
-conda activate score_prior
 conda install -y pip
 pip install --upgrade pip
 
@@ -19,10 +16,10 @@ pip install tqdm
 pip install jupyterlab
 pip install matplotlib
 pip install seaborn
-git clone https://github.com/achael/eht-imaging.git /tmp/bfeng/eht-imaging
-pip install /tmp/bfeng/eht-imaging
-git clone https://github.com/liamedeiros/ehtplot /tmp/bfeng/ehtplot
-pip install /tmp/bfeng/ehtplot
+git clone https://github.com/achael/eht-imaging.git /tmp/eht-imaging
+pip install /tmp/eht-imaging
+git clone https://github.com/liamedeiros/ehtplot /tmp/ehtplot
+pip install /tmp/ehtplot
 pip install diffrax
 pip install flax
 pip install ml-collections
@@ -32,5 +29,5 @@ conda install -c conda-forge -y pynfft
 # eht-imaging needs numpy <= 1.23
 pip uninstall numpy
 pip install numpy==1.23.*
-pip install tensorflow-probability
+pip install tensorflow-probability==0.20
 pip install parameterized

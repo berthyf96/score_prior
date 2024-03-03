@@ -31,6 +31,13 @@ Clone the repo:
 git clone https://github.com/berthyf96/score_prior
 ```
 
+Create Conda environment:
+```
+conda update -n base -c defaults conda
+conda create -n score_prior -y python=3.10
+conda activate score_prior
+```
+
 Install dependencies (please open an issue if this does not work out-of-the-box):
 ```
 sh conda.sh
