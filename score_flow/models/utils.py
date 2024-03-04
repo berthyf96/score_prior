@@ -139,7 +139,7 @@ def init_model(rng, config, data=None, label=None):
   model = model_def()
   variables = model.init({'params': params_rng, 'dropout': dropout_rng}, init_input, init_label)
   # Variables is a `flax.FrozenDict`. It is immutable and respects functional programming
-  init_model_state, initial_params = variables.pop('params')
+  init_model_state, initial_params = flax.core.pop(variables, 'params')
   return model, init_model_state, initial_params
 
 

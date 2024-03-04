@@ -29,7 +29,7 @@ class State:
   opt_state: optax.OptState
   params: PyTree
   model_state: PyTree
-  rng: jax.random.PRNGKeyArray
+  rng: jax.Array
   data_weight: float = 1.
   prior_weight: float = 1.
   entropy_weight: float = 1.
@@ -41,7 +41,7 @@ class GaussianState:
   step: int
   opt_state: optax.OptState
   params: PyTree
-  rng: jax.random.PRNGKeyArray
+  rng: jax.Array
   data_weight: float = 1.
   prior_weight: float = 1.
   entropy_weight: float = 1.
@@ -86,7 +86,7 @@ def get_model_and_init_params(config, init_softplus_log_scale=0., train=True):
     variables = model.init(init_rng, z, reverse=True)
     # `variables` is a `flax.FrozenDict`. It is immutable and respects
     # functional programming.
-    init_model_state, init_params = variables.pop('params')
+    init_model_state, init_params = flax.core.pop(variables, 'params')
   else:
     raise ValueError(f'Unrecognized bijector: {config.model.bijector}')
   return model, init_model_state, init_params
