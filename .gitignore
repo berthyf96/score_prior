@@ -164,3 +164,4 @@ cython_debug/
 *.DS_Store
 score_checkpoints/
 dpi_checkpoints/
+demos/checkpoints
