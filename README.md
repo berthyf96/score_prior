@@ -45,8 +45,8 @@ sh conda.sh
 
 The **demos** are a great way to start!
 * `demos/2d_posterior_sampling.ipynb` introduces our approach through a toy inverse problem with a known analytical prior. This is the best way to gain intuition for DPI + score-based priors.
-* `demos/denoising.ipynb` demonstrates DPI + score-based priors on a simple image denoising task. It focuses on the exact ODE-based prior.
 * `demos/interferometry.ipynb` applies DPI + score-based priors to the nonconvex problem of imaging from interferometric measurements. It uses a score-based prior trained on black-hole simulations to image a synthetic black hole. This demo focuses on the surrogate ELBO-based prior.
+* `demos/denoising.ipynb` demonstrates DPI + score-based priors on a simple image denoising task. It focuses on the exact ODE-based prior. As this is computationally heavy, it is recommended to start with the above two demos.
 
 To run `demos/denoising.ipynb` and `demos/interferometry.ipynb` with pre-trained score models, please download the `score_checkpoints` folder from [Box](https://caltech.box.com/s/r9zs7oamttj64wvamjejvs4hgk9hlsuq).
 
