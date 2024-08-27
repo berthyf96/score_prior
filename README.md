@@ -17,11 +17,15 @@ This project turns score-based diffusion models into explicit priors for Bayesia
   organization={IEEE}
 }
 
-@article{feng2023efficient,
-  title={Efficient Bayesian Computational Imaging with a Surrogate Score-based Prior},
-  author={Feng, Berthy T and Bouman, Katherine L},
-  journal={arXiv preprint arXiv:2309.01949},
-  year={2023}
+@article{
+feng2024variational,
+title={Variational Bayesian Imaging with an Efficient Surrogate Score-based Prior},
+author={Berthy Feng and Katherine Bouman},
+journal={Transactions on Machine Learning Research},
+issn={2835-8856},
+year={2024},
+url={https://openreview.net/forum?id=db2pFKVcm1},
+note={}
 }
 ```
 
