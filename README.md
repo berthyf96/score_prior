@@ -50,7 +50,7 @@ The **demos** are a great way to start!
 * `demos/interferometry.ipynb` applies DPI + score-based priors to the nonconvex problem of imaging from interferometric measurements. It uses a score-based prior trained on black-hole simulations to image a synthetic black hole. This demo focuses on the surrogate ELBO-based prior.
 * `demos/denoising.ipynb` demonstrates DPI + score-based priors on a simple image denoising task. It focuses on the exact ODE-based prior. As this is computationally heavy, it is recommended to start with the above two demos.
 
-To run `demos/denoising.ipynb` and `demos/interferometry.ipynb` with pre-trained score models, please download the `score_checkpoints` folder from [Box](https://caltech.box.com/s/r9zs7oamttj64wvamjejvs4hgk9hlsuq).
+To run `demos/denoising.ipynb` and `demos/interferometry.ipynb` with pre-trained score models, please download the `score_checkpoints` folder from [Box](https://caltech.box.com/s/rhukbjkdtiz1k2tpebfcha8ukxrx1y3s).
 
 ## Example workflow
 ### Train score model
